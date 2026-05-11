@@ -7,12 +7,20 @@ import gg.rsmod.plugins.content.combat.specialattack.SpecialAttacks
 val SPECIAL_REQUIREMENT = 50
 
 SpecialAttacks.register(SPECIAL_REQUIREMENT, Items.DRAGON_CLAWS) {
-    player.animate(Anims.DRAGON_CLAWS_SPECIAL)
 
-    val accuracy = MeleeCombatFormula.getAccuracy(player, target, specialAttackMultiplier = 1.25)
+    // Dragon claws special animation
+    player.animate(10961)
+
+    val accuracy = MeleeCombatFormula.getAccuracy(
+        player,
+        target,
+        specialAttackMultiplier = 1.25
+    )
+
     val landHit = accuracy >= world.randomDouble()
 
     for (i in 0 until 4) {
+
         val multiplier = when (i) {
             0 -> 1.10
             1 -> 0.55
