@@ -10,7 +10,7 @@ ids.forEach {
         }
 
         stats {
-            hitpoints = 2550
+            hitpoints = 5550
             attack = 280
             strength = 350
             defence = 250
