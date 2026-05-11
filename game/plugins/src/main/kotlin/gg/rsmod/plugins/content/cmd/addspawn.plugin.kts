@@ -22,6 +22,10 @@ on_command("add_item", Privilege.ADMIN_POWER) {
     }
 }
 
+on_command("curses", Privilege.ADMIN_POWER) {
+    player.varps.setState(1584, 1)
+}
+
 on_command("add_npc", Privilege.ADMIN_POWER) {
     val args = player.getCommandArgs()
     tryWithUsage(player, args, "Invalid format! Example of proper command <col=42C66C>::add_spawn 0</col>") { values ->
