@@ -19,13 +19,18 @@ SpecialAttacks.register(SPECIAL_REQUIREMENT, Items.DRAGON_CLAWS) {
 
     val landHit = accuracy >= world.randomDouble()
 
-    for (i in 0 until 4) {
+    val multipliers = listOf(
+        1.10,
+        0.80,
+        0.60,
+        0.45,
+        0.35,
+        0.30,
+        0.25,
+        0.20
+    )
 
-        val multiplier = when (i) {
-            0 -> 1.10
-            1 -> 0.55
-            else -> 0.25
-        }
+    for ((i, multiplier) in multipliers.withIndex()) {
 
         val maxHit = MeleeCombatFormula.getMaxHit(
             player,
@@ -37,7 +42,13 @@ SpecialAttacks.register(SPECIAL_REQUIREMENT, Items.DRAGON_CLAWS) {
             target = target,
             maxHit = maxHit,
             landHit = landHit,
-            delay = if (target.entityType.isNpc) i + 1 else 1,
+
+            // First 4 hits immediately, last 4 shortly after
+            delay = when {
+                i < 4 -> 1
+                else -> 2
+            },
+
             hitType = HitType.MELEE,
         )
     }
