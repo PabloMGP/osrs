@@ -1,5 +1,7 @@
 package gg.rsmod.plugins.content.cmd
 
+import gg.rsmod.game.model.entity.Pawn
+import gg.rsmod.plugins.content.combat.*
 import de.mkammerer.argon2.Argon2Factory
 import gg.rsmod.game.fs.def.NpcDef
 import gg.rsmod.game.message.impl.LocAnimMessage
@@ -961,6 +963,47 @@ on_command("reset", Privilege.ADMIN_POWER) {
         player.skills.setBaseLevel(i, if (i == Skills.CONSTITUTION) 10 else 1)
     }
     player.calculateAndSetCombatLevel()
+}
+
+val npcFollowers = mutableMapOf<Player, Npc>()
+
+on_command("npcfollow", Privilege.ADMIN_POWER) {
+    val args = player.getCommandArgs()
+
+    if (args.isEmpty()) {
+        player.message("Usage: ::npcfollow npcId")
+        return@on_command
+    }
+
+    val npcId = args[0].toIntOrNull() ?: return@on_command
+
+    npcFollowers[player]?.let {
+        world.remove(it)
+    }
+
+    val follower = Npc(npcId, player.tile.transform(1, 0, 0), world)
+    follower.walkRadius = 0
+
+    world.spawn(follower)
+    npcFollowers[player] = follower
+
+    player.message("<col=00ff00>Spawned NPC $npcId as your follower.</col>")
+
+    player.queue {
+        while (npcFollowers[player] == follower) {
+            val followTile = player.tile.transform(1, 0, 0)
+
+            world.remove(follower)
+
+            val newFollower = Npc(npcId, followTile, world)
+            newFollower.walkRadius = 0
+
+            world.spawn(newFollower)
+            npcFollowers[player] = newFollower
+
+            wait(1)
+        }
+    }
 }
 
 on_command("setxp", Privilege.ADMIN_POWER) {

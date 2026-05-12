@@ -100,6 +100,15 @@ on_npc_combat(*Revenants.ids) {
 }
 
 /**
+ * Sets the [on_npc_combat] for General Graardor
+ */
+on_npc_combat(*GeneralGraardorCombatScript.ids) {
+    npc.queue {
+        GeneralGraardorCombatScript.handleSpecialCombat(this)
+    }
+}
+
+/**
  * Sets the [on_npc_combat] for Rock Crabs
  */
 on_npc_combat(*RockCrabsCombatScript.ids) {

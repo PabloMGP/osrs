@@ -1,5 +1,7 @@
 package gg.rsmod.plugins.content.combat.scripts.impl
 
+import gg.rsmod.game.model.Graphic
+import gg.rsmod.game.model.World
 import gg.rsmod.game.model.combat.CombatClass
 import gg.rsmod.game.model.combat.CombatScript
 import gg.rsmod.game.model.combat.StyleType
@@ -10,11 +12,13 @@ import gg.rsmod.game.model.entity.Player
 import gg.rsmod.game.model.queue.QueueTask
 import gg.rsmod.plugins.api.ChatMessageType
 import gg.rsmod.plugins.api.HitType
+import gg.rsmod.plugins.api.ProjectileType
 import gg.rsmod.plugins.api.Skills
+import gg.rsmod.plugins.api.cfg.Gfx
 import gg.rsmod.plugins.api.ext.*
 import gg.rsmod.plugins.content.combat.*
 import gg.rsmod.plugins.content.combat.formula.MeleeCombatFormula
-import gg.rsmod.plugins.content.combat.formula.RangedCombatFormula
+import gg.rsmod.plugins.content.combat.strategy.MagicCombatStrategy
 
 object GeneralGraardorCombatScript : CombatScript() {
 
@@ -22,14 +26,15 @@ object GeneralGraardorCombatScript : CombatScript() {
 
     override suspend fun handleSpecialCombat(it: QueueTask) {
         val npc = it.npc
+        val world = npc.world
         var target = npc.getCombatTarget() ?: return
 
         var attackCounter = 0
         var phase = 1
 
-        target.msg("<col=ff0000>General Graardor custom script loaded.</col>")
+        target.msg("<col=ff0000>General Graardor roars: BANDOS DEMANDS BLOOD!</col>")
 
-        while (npc.canEngageCombat(target)) {
+        while (npc.canEngageCombat(target) && npc.isAttackDelayReady()) {
             npc.facePawn(target)
 
             val hpPercent =
@@ -47,39 +52,43 @@ object GeneralGraardorCombatScript : CombatScript() {
                 phase = newPhase
 
                 when (phase) {
-                    2 -> {
-                        target.msg("<col=ff9900>Graardor roars: BANDOS WILL CRUSH YOU!</col>")
-                        target.msg("<col=ff9900>Phase 2: Shockwaves become faster.</col>")
-                    }
-
-                    3 -> {
-                        target.msg("<col=ff0000>Graardor becomes enraged!</col>")
-                        target.msg("<col=ff0000>Phase 3: He can freeze, poison, and drain your stats.</col>")
-                    }
-
-                    4 -> {
-                        target.msg("<col=990000>GRAARDOR ENTERS BERSERK MODE!</col>")
-                        target.msg("<col=990000>Phase 4: Faster attacks and brutal double hits.</col>")
-                    }
+                    2 -> target.msg("<col=ff9900>Graardor enters Phase 2: ranged shockwaves unlocked.</col>")
+                    3 -> target.msg("<col=ff0000>Graardor enters Phase 3: stuns, poison, and stat drains unlocked.</col>")
+                    4 -> target.msg("<col=990000>GRAARDOR ENTERS BERSERK MODE. Pray correctly or die.</col>")
                 }
             }
 
-            if (
-                npc.moveToAttackRange(it, target, distance = 1, projectile = false) &&
-                npc.isAttackDelayReady()
-            ) {
+            val distance = npc.getFrontFacingTile(target).getDistance(target.tile)
+
+            /*
+             * Important:
+             * If ranged/mage is allowed from too far away, Graardor will camp one tile
+             * and never need to chase the player.
+             *
+             * This forces him to walk closer first, then use melee/ranged/mage once nearby.
+             */
+            if (distance > 4) {
+                npc.moveToAttackRange(it, target, distance = 3, projectile = false)
+            } else if (distance <= 1 && npc.moveToAttackRange(it, target, distance = 1, projectile = false)) {
                 attackCounter++
 
                 when {
-                    phase >= 4 && attackCounter % 2 == 0 -> berserkCombo(npc, target)
-
-                    phase >= 3 && attackCounter % 4 == 0 -> crushingRoar(npc, target)
-
-                    phase >= 3 && attackCounter % 3 == 0 -> bindingSlam(npc, target)
-
-                    phase >= 2 && attackCounter % 3 == 0 -> shockwave(npc, target, phase)
-
+                    phase >= 4 && attackCounter % 4 == 0 -> berserkCombo(npc, target, world)
+                    phase >= 4 && attackCounter % 5 == 0 -> prayerPunish(npc, target, world)
+                    phase >= 3 && attackCounter % 6 == 0 -> crushingRoar(npc, target, world)
+                    phase >= 3 && attackCounter % 5 == 0 -> bindingSlam(npc, target)
+                    phase >= 2 && attackCounter % 4 == 0 -> rangedShockwave(npc, target, world, phase)
                     else -> meleeSmash(npc, target, phase)
+                }
+
+                npc.postAttackLogic(target)
+            } else if (npc.moveToAttackRange(it, target, distance = 4, projectile = true)) {
+                attackCounter++
+
+                when {
+                    phase >= 4 && attackCounter % 4 == 0 -> rangedShockwave(npc, target, world, phase)
+                    phase >= 3 && attackCounter % 5 == 0 -> crushingRoar(npc, target, world)
+                    else -> rangedBoulder(npc, target, world)
                 }
 
                 npc.postAttackLogic(target)
@@ -87,9 +96,9 @@ object GeneralGraardorCombatScript : CombatScript() {
 
             it.wait(
                 when (phase) {
-                    4 -> 1
-                    3 -> 2
-                    else -> 3
+                    4 -> 3
+                    3 -> 4
+                    else -> 5
                 }
             )
 
@@ -100,8 +109,12 @@ object GeneralGraardorCombatScript : CombatScript() {
         npc.removeCombatTarget()
     }
 
-    private fun meleeSmash(npc: Npc, target: Pawn, phase: Int) {
-        npc.prepareAttack(CombatClass.MELEE, StyleType.CRUSH, WeaponStyle.ACCURATE)
+    private fun meleeSmash(
+        npc: Npc,
+        target: Pawn,
+        phase: Int,
+    ) {
+        npc.prepareAttack(CombatClass.MELEE, StyleType.CRUSH, WeaponStyle.AGGRESSIVE)
         npc.animate(npc.combatDef.attackAnimation)
 
         if (phase >= 2) {
@@ -116,36 +129,100 @@ object GeneralGraardorCombatScript : CombatScript() {
         )
     }
 
-    private fun shockwave(npc: Npc, target: Pawn, phase: Int) {
+    private fun rangedBoulder(
+        npc: Npc,
+        target: Pawn,
+        world: World,
+    ) {
         npc.prepareAttack(CombatClass.RANGED, StyleType.CRUSH, WeaponStyle.ACCURATE)
-        npc.animate(npc.combatDef.attackAnimation)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
 
-        target.msg("<col=ff0000>Graardor slams the ground: SHOCKWAVE!</col>")
+        target.msg("<col=ff9900>Graardor hurls a corrupted Bandos projectile!</col>")
+
+        val projectile = npc.createProjectile(
+            target = target,
+            gfx = Gfx.RED_DRAGONFIRE_PROJ,
+            type = ProjectileType.ARROW,
+        )
+
+        val hitDelay = MagicCombatStrategy.getHitDelay(
+            npc.getFrontFacingTile(target),
+            target.getCentreTile(),
+        )
+
+        world.spawn(projectile)
 
         npc.dealHit(
             target = target,
-            formula = RangedCombatFormula,
-            delay = 1,
+            formula = MeleeCombatFormula,
+            delay = hitDelay,
+            type = HitType.RANGE,
+        )
+    }
+
+    private fun rangedShockwave(
+        npc: Npc,
+        target: Pawn,
+        world: World,
+        phase: Int,
+    ) {
+        npc.prepareAttack(CombatClass.RANGED, StyleType.CRUSH, WeaponStyle.ACCURATE)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
+
+        target.msg("<col=ff0000>Graardor slams the ground: SHOCKWAVE!</col>")
+
+        val projectile = npc.createProjectile(
+            target = target,
+            gfx = Gfx.RED_DRAGONFIRE_PROJ,
+            type = ProjectileType.ARROW,
+        )
+
+        val hitDelay = MagicCombatStrategy.getHitDelay(
+            npc.getFrontFacingTile(target),
+            target.getCentreTile(),
+        )
+
+        world.spawn(projectile)
+        target.graphic(Graphic(Gfx.RESET, 110, projectile.lifespan))
+
+        npc.dealHit(
+            target = target,
+            formula = MeleeCombatFormula,
+            delay = hitDelay,
             type = HitType.RANGE,
         )
 
         if (phase >= 3) {
-            target.msg("<col=ff3300>The shockwave echoes again!</col>")
+            target.msg("<col=ff3300>A second shockwave follows!</col>")
 
             npc.dealHit(
                 target = target,
-                formula = RangedCombatFormula,
-                delay = 2,
+                formula = MeleeCombatFormula,
+                delay = hitDelay + 1,
+                type = HitType.RANGE,
+            )
+        }
+
+        if (phase >= 4) {
+            target.msg("<col=990000>The entire room shakes violently!</col>")
+
+            npc.dealHit(
+                target = target,
+                formula = MeleeCombatFormula,
+                delay = hitDelay + 2,
                 type = HitType.RANGE,
             )
         }
     }
 
-    private fun bindingSlam(npc: Npc, target: Pawn) {
+    private fun bindingSlam(
+        npc: Npc,
+        target: Pawn,
+    ) {
         npc.prepareAttack(CombatClass.MELEE, StyleType.CRUSH, WeaponStyle.AGGRESSIVE)
-        npc.animate(npc.combatDef.attackAnimation)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
 
-        target.msg("<col=00ccff>Graardor smashes the floor and pins you in place!</col>")
+        target.msg("<col=00ccff>Graardor pins you with a binding slam!</col>")
 
         npc.dealHit(
             target = target,
@@ -153,39 +230,109 @@ object GeneralGraardorCombatScript : CombatScript() {
             delay = 1,
             type = HitType.MELEE,
         ) {
-            target.freeze(cycles = 4) {
-                target.msg("<col=00ccff>You have been stunned by Graardor's slam.</col>")
+            target.freeze(cycles = 5) {
+                target.msg("<col=00ccff>You are stunned by Graardor's slam.</col>")
             }
         }
     }
 
-    private fun crushingRoar(npc: Npc, target: Pawn) {
+    private fun crushingRoar(
+        npc: Npc,
+        target: Pawn,
+        world: World,
+    ) {
         npc.prepareAttack(CombatClass.MAGIC, StyleType.MAGIC, WeaponStyle.ACCURATE)
-        npc.animate(npc.combatDef.attackAnimation)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
 
         target.msg("<col=cc00ff>Graardor releases a crushing roar!</col>")
 
+        val projectile = npc.createProjectile(
+            target = target,
+            gfx = Gfx.BLUE_DRAGONFIRE_PROJ,
+            type = ProjectileType.MAGIC,
+        )
+
+        val hitDelay = MagicCombatStrategy.getHitDelay(
+            npc.getFrontFacingTile(target),
+            target.getCentreTile(),
+        )
+
+        world.spawn(projectile)
+        target.graphic(Graphic(Gfx.RESET, 110, projectile.lifespan))
+
         if (target is Player) {
-            target.skills.decrementCurrentLevel(Skills.ATTACK, 5, capped = false)
-            target.skills.decrementCurrentLevel(Skills.STRENGTH, 5, capped = false)
-            target.skills.decrementCurrentLevel(Skills.DEFENCE, 5, capped = false)
+            target.skills.decrementCurrentLevel(Skills.ATTACK, 4, capped = false)
+            target.skills.decrementCurrentLevel(Skills.STRENGTH, 4, capped = false)
+            target.skills.decrementCurrentLevel(Skills.DEFENCE, 4, capped = false)
             target.skills.decrementCurrentLevel(Skills.PRAYER, 3, capped = false)
             target.message("Your combat stats and prayer are drained.", ChatMessageType.GAME_MESSAGE)
         }
 
         npc.dealHit(
             target = target,
-            formula = RangedCombatFormula,
-            delay = 1,
-            type = HitType.REGULAR_HIT,
+            formula = MeleeCombatFormula,
+            delay = hitDelay,
+            type = HitType.MAGIC,
         )
 
-        target.poison(6)
+        target.poison(4)
     }
 
-    private fun berserkCombo(npc: Npc, target: Pawn) {
+    private fun prayerPunish(
+        npc: Npc,
+        target: Pawn,
+        world: World,
+    ) {
+        npc.prepareAttack(CombatClass.MAGIC, StyleType.MAGIC, WeaponStyle.AGGRESSIVE)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
+
+        target.msg("<col=ff00ff>Graardor studies your protection prayer...</col>")
+
+        val projectile = npc.createProjectile(
+            target = target,
+            gfx = Gfx.WHITE_DRAGONFIRE_PROJ,
+            type = ProjectileType.MAGIC,
+        )
+
+        val hitDelay = MagicCombatStrategy.getHitDelay(
+            npc.getFrontFacingTile(target),
+            target.getCentreTile(),
+        )
+
+        world.spawn(projectile)
+        target.graphic(Graphic(Gfx.RESET, 110, projectile.lifespan))
+
+        if (target is Player) {
+            target.message(
+                "<col=ff0000>Graardor punishes your prayer and drains your Prayer points!</col>",
+                ChatMessageType.GAME_MESSAGE,
+            )
+
+            target.skills.decrementCurrentLevel(Skills.PRAYER, 5, capped = false)
+        }
+
+        npc.dealHit(
+            target = target,
+            formula = MeleeCombatFormula,
+            delay = hitDelay,
+            type = HitType.MAGIC,
+        )
+
+        npc.dealHit(
+            target = target,
+            formula = MeleeCombatFormula,
+            delay = hitDelay + 1,
+            type = HitType.RANGE,
+        )
+    }
+
+    private fun berserkCombo(
+        npc: Npc,
+        target: Pawn,
+        world: World,
+    ) {
         npc.prepareAttack(CombatClass.MELEE, StyleType.CRUSH, WeaponStyle.AGGRESSIVE)
-        npc.animate(npc.combatDef.attackAnimation)
+        npc.animate(npc.combatDef.attackAnimation, priority = true)
 
         target.msg("<col=990000>Graardor unleashes a berserk combo!</col>")
 
@@ -196,19 +343,27 @@ object GeneralGraardorCombatScript : CombatScript() {
             type = HitType.MELEE,
         )
 
-        npc.dealHit(
+        val projectile = npc.createProjectile(
             target = target,
-            formula = MeleeCombatFormula,
-            delay = 2,
-            type = HitType.MELEE,
+            gfx = Gfx.RED_DRAGONFIRE_PROJ,
+            type = ProjectileType.ARROW,
         )
+
+        val hitDelay = MagicCombatStrategy.getHitDelay(
+            npc.getFrontFacingTile(target),
+            target.getCentreTile(),
+        )
+
+        world.spawn(projectile)
 
         npc.dealHit(
             target = target,
-            formula = RangedCombatFormula,
-            delay = 3,
+            formula = MeleeCombatFormula,
+            delay = hitDelay,
             type = HitType.RANGE,
         )
+
+        target.poison(3)
     }
 
     private fun Pawn.msg(message: String) {
